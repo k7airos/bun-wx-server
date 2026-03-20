@@ -1,0 +1,20 @@
+{
+  "name": "blog-wx-bun-service",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts serve",
+    "start": "bun src/index.ts serve",
+    "serve": "bun src/index.ts serve",
+    "migrate": "bun src/index.ts migrate",
+    "init-admin": "bun src/index.ts init-admin",
+    "backup": "bun src/index.ts backup",
+    "restore": "bun src/index.ts restore",
+    "check-config": "bun src/index.ts check-config",
+    "test": "bun test",
+    "check": "bun test && bun src/index.ts --help && bun src/index.ts check-config",
+    "build:binary": "mkdir -p dist && bun build ./src/index.ts --compile --outfile ./dist/blog-wx-bun-service",
+    "build:bundle": "mkdir -p dist && bun build ./src/index.ts --outfile ./dist/index.js"
+  }
+}
