@@ -239,6 +239,7 @@ bun run release:patch:prod
 
 - `release:*` 只负责更新版本、生成 changelog、创建 tag 并 push
 - `release:*:prod` 会在此基础上继续执行 `scripts/deploy-prod.sh`
+- `deploy:prod` 会把当前本地源码打包上传到服务器，再执行 `bun install`、迁移、PM2 重启与 `/ready` 健康检查
 - 正式部署参数统一从 `.deploy.prod.env` 读取，避免把服务器目录、端口、PM2 名称写死在 `package.json`
 
 ## Bun 单文件分发

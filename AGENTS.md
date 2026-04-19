@@ -271,6 +271,7 @@
   - `bun run release:major:prod`
 - 正式部署参数统一读取仓库根目录 `.deploy.prod.env`
 - 不要把服务器目录、PM2 名称、端口、健康检查路径硬编码在 `package.json` 脚本里
+- `deploy:prod` 采用“本地打包上传源码，再在服务器 bun install + migrate + pm2 restart”的方式，不依赖服务器直接拉 GitHub
 - 如果正式流量入口尚未切换，不要把“部署到服务器”和“切 Caddy 域名路由”混为一件事
 
 ## 版本管理
