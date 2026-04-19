@@ -1,15 +1,17 @@
-import { createHash, randomBytes } from 'node:crypto'
-
 export function sha256(value: string) {
-  return createHash('sha256').update(value).digest('hex')
+  const hasher = new Bun.CryptoHasher('sha256')
+  hasher.update(value)
+  return hasher.digest('hex')
 }
 
 export function randomId(size = 16) {
-  return randomBytes(size).toString('hex')
+  const bytes = crypto.getRandomValues(new Uint8Array(size))
+  return Buffer.from(bytes).toString('hex')
 }
 
 export function randomToken(prefix = '', size = 32) {
-  return `${prefix}${randomBytes(size).toString('base64url')}`
+  const bytes = crypto.getRandomValues(new Uint8Array(size))
+  return `${prefix}${Buffer.from(bytes).toString('base64url')}`
 }
 
 export function unixNow() {
@@ -39,4 +41,18 @@ export function camelizeKeys(input: any): any {
     )
   }
   return input
+}
+
+export function constantTimeEqual(left: string, right: string) {
+  const leftBytes = Buffer.from(left)
+  const rightBytes = Buffer.from(right)
+  if (leftBytes.length !== rightBytes.length) {
+    return false
+  }
+
+  let diff = 0
+  for (let index = 0; index < leftBytes.length; index += 1) {
+    diff |= leftBytes[index] ^ rightBytes[index]
+  }
+  return diff === 0
 }

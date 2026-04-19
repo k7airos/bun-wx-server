@@ -1,10 +1,10 @@
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
 import { Database } from 'bun:sqlite'
 import { config } from './config'
+import { copyFileSync, ensureDirSync, existsSync } from './lib/bun-fs'
 import { badRequest } from './lib/errors'
+import { dirnamePath, resolvePath } from './lib/path'
 
-mkdirSync(config.databaseDir, { recursive: true })
+ensureDirSync(config.databaseDir)
 
 export const db = new Database(config.databasePath, { create: true })
 
@@ -51,6 +51,98 @@ const migrations = [
 
       CREATE INDEX IF NOT EXISTS idx_pat_user_id ON personal_access_tokens(user_id);
       CREATE INDEX IF NOT EXISTS idx_refresh_user_id ON refresh_tokens(user_id);
+      `)
+    },
+  },
+  {
+    id: '002_user_profile_and_pat_note',
+    up() {
+      db.exec(`
+      ALTER TABLE users ADD COLUMN email TEXT;
+      `)
+    },
+  },
+  {
+    id: '003_user_avatar_and_website',
+    up() {
+      db.exec(`
+      ALTER TABLE users ADD COLUMN avatar_url TEXT;
+      `)
+    },
+  },
+  {
+    id: '004_user_website',
+    up() {
+      db.exec(`
+      ALTER TABLE users ADD COLUMN website TEXT;
+      `)
+    },
+  },
+  {
+    id: '005_oauth_tables',
+    up() {
+      db.exec(`
+      CREATE TABLE IF NOT EXISTS oauth_accounts (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        provider_user_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        provider_login TEXT,
+        provider_email TEXT,
+        provider_avatar TEXT,
+        access_token TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(provider, provider_user_id),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS oauth_login_states (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        state TEXT NOT NULL UNIQUE,
+        redirect_path TEXT,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS oauth_exchange_codes (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        code TEXT NOT NULL UNIQUE,
+        redirect_path TEXT,
+        is_used INTEGER NOT NULL DEFAULT 0,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_oauth_accounts_user_id ON oauth_accounts(user_id);
+      CREATE INDEX IF NOT EXISTS idx_oauth_states_provider ON oauth_login_states(provider);
+      CREATE INDEX IF NOT EXISTS idx_oauth_exchange_codes_user_id ON oauth_exchange_codes(user_id);
+      `)
+    },
+  },
+  {
+    id: '006_audit_logs',
+    up() {
+      db.exec(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id TEXT PRIMARY KEY,
+        request_id TEXT,
+        action TEXT NOT NULL,
+        actor_user_id TEXT,
+        actor_role TEXT,
+        status TEXT NOT NULL DEFAULT 'success',
+        target_type TEXT,
+        target_id TEXT,
+        metadata_json TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_request_id ON audit_logs(request_id);
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_user_id ON audit_logs(actor_user_id);
       `)
     },
   },
@@ -101,24 +193,24 @@ export function closeDatabase() {
 export function backupDatabase(outputPath: string) {
   initializeDatabase()
 
-  const resolvedPath = resolve(process.cwd(), outputPath)
+  const resolvedPath = resolvePath(process.cwd(), outputPath)
   if (resolvedPath === config.databasePath) {
     throw badRequest('备份路径不能与主数据库路径相同')
   }
 
-  mkdirSync(dirname(resolvedPath), { recursive: true })
+  ensureDirSync(dirnamePath(resolvedPath))
   closeDatabase()
   copyFileSync(config.databasePath, resolvedPath)
   return resolvedPath
 }
 
 export function restoreDatabase(inputPath: string) {
-  const resolvedPath = resolve(process.cwd(), inputPath)
+  const resolvedPath = resolvePath(process.cwd(), inputPath)
   if (!existsSync(resolvedPath)) {
     throw badRequest(`备份文件不存在: ${resolvedPath}`)
   }
 
-  mkdirSync(config.databaseDir, { recursive: true })
+  ensureDirSync(config.databaseDir)
   closeDatabase()
   copyFileSync(resolvedPath, config.databasePath)
   return config.databasePath

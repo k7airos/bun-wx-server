@@ -2,3 +2,5 @@
 .data/
 .backup/
 dist/
+node_modules/
+Users/

@@ -1,7 +1,8 @@
-import { basename, resolve } from 'node:path'
 import { config, assertRuntimeConfig, getConfigWarnings } from './config'
 import { backupDatabase, restoreDatabase, runMigrations } from './db'
 import { createInitialAdmin } from './lib/auth'
+import { basenamePath, resolvePath } from './lib/path'
+import { cleanupAuditLogs } from './modules/audit'
 import { startServer } from './server'
 
 type ParsedArgs = {
@@ -54,6 +55,7 @@ Commands:
   bun src/index.ts backup [--output .backup/app-YYYYMMDD-HHmmss.sqlite]
   bun src/index.ts restore --input .backup/app.sqlite
   bun src/index.ts check-config
+  bun src/index.ts cleanup-audit [--days 90]
 
 Distribution:
   bun run build:binary
@@ -67,6 +69,18 @@ function readRequiredOption(options: Record<string, string | boolean>, key: stri
     throw new Error(`缺少参数 --${key}`)
   }
   return value.trim()
+}
+
+function readOptionalPositiveIntOption(options: Record<string, string | boolean>, key: string, fallback: number) {
+  const value = options[key]
+  if (value === undefined || value === true) {
+    return fallback
+  }
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`参数 --${key} 必须是正整数`)
+  }
+  return parsed
 }
 
 function makeBackupFilename() {
@@ -129,17 +143,30 @@ switch (args.command) {
   case 'check-config': {
     assertRuntimeConfig('serve')
     const warnings = getConfigWarnings('serve')
-    const safeDatabasePath = resolve(config.databasePath)
+    const safeDatabasePath = resolvePath(config.databasePath)
     console.log(`[blog-wx-bun-service] config ok`)
     console.log(`nodeEnv=${config.nodeEnv}`)
     console.log(`databasePath=${safeDatabasePath}`)
-    console.log(`databaseFile=${basename(safeDatabasePath)}`)
+    console.log(`databaseFile=${basenamePath(safeDatabasePath)}`)
     if (!warnings.length) {
       console.log('warnings=none')
     }
     else {
       warnings.forEach(warning => console.log(`warning=${warning}`))
     }
+    break
+  }
+
+  case 'cleanup-audit': {
+    const retentionDays = readOptionalPositiveIntOption(args.options, 'days', config.auditRetentionDays)
+    const result = cleanupAuditLogs(retentionDays)
+    console.log('[blog-wx-bun-service] audit cleanup completed')
+    console.log(`retentionDays=${result.retentionDays}`)
+    console.log(`cutoffIso=${result.cutoffIso}`)
+    console.log(`matchedBeforeCleanup=${result.matchedBeforeCleanup}`)
+    console.log(`deletedCount=${result.deletedCount}`)
+    console.log(`totalBeforeCleanup=${result.totalBeforeCleanup}`)
+    console.log(`totalAfterCleanup=${result.totalAfterCleanup}`)
     break
   }
 

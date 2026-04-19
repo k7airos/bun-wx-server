@@ -1,6 +1,5 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
 import { config } from '../config'
-import { unixNow } from './utils'
+import { constantTimeEqual, unixNow } from './utils'
 
 interface JwtPayload {
   userId: string
@@ -18,7 +17,9 @@ function base64urlDecode(input: string) {
 }
 
 function signSegment(segment: string) {
-  return createHmac('sha256', config.jwtSecret).update(segment).digest('base64url')
+  const hasher = new Bun.CryptoHasher('sha256', config.jwtSecret)
+  hasher.update(segment)
+  return hasher.digest('base64url')
 }
 
 export function signJwt(payload: Omit<JwtPayload, 'iat' | 'exp'>, expiresInSeconds = config.jwtExpiresInSeconds) {
@@ -47,9 +48,7 @@ export function verifyJwt(token: string): { isAuth: boolean, payload?: JwtPayloa
   const signingInput = `${encodedHeader}.${encodedPayload}`
   const expectedSignature = signSegment(signingInput)
 
-  const actual = Buffer.from(signature)
-  const expected = Buffer.from(expectedSignature)
-  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+  if (!constantTimeEqual(signature, expectedSignature)) {
     return { isAuth: false, error: 'invalid-signature' }
   }
 
