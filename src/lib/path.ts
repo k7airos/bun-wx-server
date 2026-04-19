@@ -56,25 +56,37 @@ export function extnamePath(input: string) {
 }
 
 export function resolvePath(...parts: string[]) {
-  const segments = parts
+  const normalizedParts = parts
     .filter(Boolean)
-    .flatMap(part => normalize(part).split('/'))
+    .map(part => normalize(part))
+
+  let startIndex = 0
+  for (let index = normalizedParts.length - 1; index >= 0; index -= 1) {
+    if (normalizedParts[index].startsWith('/')) {
+      startIndex = index
+      break
+    }
+  }
+
+  const segments = normalizedParts
+    .slice(startIndex)
+    .flatMap(part => part.split('/'))
 
   const resolved: string[] = []
   let absolute = false
 
   for (const part of segments) {
-    if (!part || part === '.') {
+    if (part === '') {
+      absolute = true
+      continue
+    }
+    if (part === '.') {
       continue
     }
     if (part === '..') {
       if (resolved.length > 0) {
         resolved.pop()
       }
-      continue
-    }
-    if (part === '') {
-      absolute = true
       continue
     }
     resolved.push(part)
