@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+set -eu
+
+message_file="$1"
+message="$(head -n 1 "$message_file" | tr -d '\r')"
+
+pattern='^(feat|fix|refactor|perf|docs|test|build|ci|chore)(\([a-z0-9._/-]+\))?!?: .+'
+
+if printf '%s' "$message" | grep -Eq "$pattern"; then
+  exit 0
+fi
+
+cat >&2 <<'EOF'
+Invalid commit message.
+
+Use Conventional Commit prefixes, for example:
+  feat: add release scripts
+  fix(path): handle absolute database paths
+  chore(ci): disable github actions
+  docs: update AGENTS release workflow
+EOF
+
+exit 1

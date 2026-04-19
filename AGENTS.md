@@ -240,6 +240,44 @@
 - 为了“规范”而大量增加样板代码
 - 不带迁移策略地删除兼容门面层
 
+## Commit 风格
+
+- 必须使用带前缀的 Conventional Commit
+- 允许的前缀：
+  - `feat:`
+  - `feat(scope):`
+  - `fix:`
+  - `fix(scope):`
+  - `refactor:`
+  - `perf:`
+  - `docs:`
+  - `test:`
+  - `build:`
+  - `ci:`
+  - `chore:`
+- 修 bug 不要再用 `chore:` 代替，应该使用 `fix:`
+- 工具链、脚本、依赖、发版流程调整，优先使用 `build:` / `ci:` / `chore:`
+- 当前仓库已配置 `.githooks/commit-msg` 校验；提交信息不带前缀会被拒绝
+
+## 版本管理
+
+- 仓库使用 `changelogen` 管理版本号与 `CHANGELOG.md`
+- 已提供：
+  - `bun run release:patch`
+  - `bun run release:minor`
+  - `bun run release:major`
+- 三个命令都内置 `--push`，会执行：
+  - 更新 `CHANGELOG.md`
+  - 更新 `package.json` 版本号
+  - 创建 release commit
+  - 创建 git tag 并 push commit/tag
+- 推荐流程：
+  - 先将业务改动用规范 commit 提交
+  - 再执行对应的 `release:*`
+- 发版前保证工作区干净，并至少完成：
+  - `bun test`
+  - `bun src/index.ts check-config`
+
 ## 文件修改约定
 
 ### 新增路由
