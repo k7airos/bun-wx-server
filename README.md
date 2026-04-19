@@ -218,6 +218,29 @@ bun run start
 - `GET /health`
 - `GET /ready`
 
+## 发版与部署
+
+纯发版：
+
+```bash
+bun run release:patch
+bun run release:minor
+bun run release:major
+```
+
+发版后顺带部署正式环境：
+
+```bash
+cp .deploy.prod.env.example .deploy.prod.env
+bun run release:patch:prod
+```
+
+说明：
+
+- `release:*` 只负责更新版本、生成 changelog、创建 tag 并 push
+- `release:*:prod` 会在此基础上继续执行 `scripts/deploy-prod.sh`
+- 正式部署参数统一从 `.deploy.prod.env` 读取，避免把服务器目录、端口、PM2 名称写死在 `package.json`
+
 ## Bun 单文件分发
 
 这是首选分发方式之一，适合没有 Docker Hub 访问条件的用户。

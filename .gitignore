@@ -1,4 +1,5 @@
 .env
+.deploy.prod.env
 .data/
 .backup/
 dist/

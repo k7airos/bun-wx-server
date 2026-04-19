@@ -259,6 +259,20 @@
 - 工具链、脚本、依赖、发版流程调整，优先使用 `build:` / `ci:` / `chore:`
 - 当前仓库已配置 `.githooks/commit-msg` 校验；提交信息不带前缀会被拒绝
 
+## 发版与部署
+
+- 纯发版使用：
+  - `bun run release:patch`
+  - `bun run release:minor`
+  - `bun run release:major`
+- 发版后直接部署正式环境使用：
+  - `bun run release:patch:prod`
+  - `bun run release:minor:prod`
+  - `bun run release:major:prod`
+- 正式部署参数统一读取仓库根目录 `.deploy.prod.env`
+- 不要把服务器目录、PM2 名称、端口、健康检查路径硬编码在 `package.json` 脚本里
+- 如果正式流量入口尚未切换，不要把“部署到服务器”和“切 Caddy 域名路由”混为一件事
+
 ## 版本管理
 
 - 仓库使用 `changelogen` 管理版本号与 `CHANGELOG.md`

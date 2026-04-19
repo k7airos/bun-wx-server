@@ -18,9 +18,13 @@
     "check": "bun test && bun src/index.ts --help && bun src/index.ts check-config",
     "build:binary": "mkdir -p dist && bun build ./src/index.ts --compile --outfile ./dist/blog-wx-bun-service",
     "build:bundle": "mkdir -p dist && bun build ./src/index.ts --outfile ./dist/index.js",
+    "deploy:prod": "bash ./scripts/deploy-prod.sh",
     "release:patch": "changelogen --release --patch --push",
+    "release:patch:prod": "bun run release:patch && bun run deploy:prod",
     "release:minor": "changelogen --release --minor --push",
-    "release:major": "changelogen --release --major --push"
+    "release:minor:prod": "bun run release:minor && bun run deploy:prod",
+    "release:major": "changelogen --release --major --push",
+    "release:major:prod": "bun run release:major && bun run deploy:prod"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
