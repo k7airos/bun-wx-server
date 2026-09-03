@@ -1,11 +1,13 @@
-FROM oven/bun:1 AS builder
+FROM oven/bun:1@sha256:18639686662e5cd8a963ffb967dd130034a2a2d076a52e65dfd4fe18f75cc038 AS builder
 
 WORKDIR /app
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 COPY . .
 RUN bun run check
 RUN bun run build:binary
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867
 
 WORKDIR /app
 
