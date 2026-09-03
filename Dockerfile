@@ -4,7 +4,9 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY . .
-RUN bun run check
+RUN bun test --max-concurrency=1 \
+  && bun src/index.ts --help \
+  && bun src/index.ts check-config
 RUN bun run build:binary
 
 FROM debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867
