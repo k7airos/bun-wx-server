@@ -4,7 +4,8 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY . .
-RUN bun test --max-concurrency=1 \
+RUN bun test tests/unit.test.ts \
+  && bun test tests/service.test.ts \
   && bun src/index.ts --help \
   && bun src/index.ts check-config
 RUN bun run build:binary
