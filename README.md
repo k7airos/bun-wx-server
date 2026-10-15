@@ -6,6 +6,19 @@
 2. COS 上传凭证：签发临时 STS，让客户端直传 COS
 3. 微信公众号代理：获取 token、上传永久素材、创建草稿
 
+## 生态与使用者
+
+| 项目 | 与本服务的关系 |
+| --- | --- |
+| [blog.zzao.club](https://github.com/k7airos/blog.zzao.club) | 本服务的 API 语义来源，保留认证、PAT、COS 和基础微信代理契约；不是本服务的运行时依赖 |
+| [zzhub-pipeline](https://github.com/k7airos/zzhub-pipeline) | 需要微信中转 API 的潜在调用方；本服务目前只覆盖部分端点，不能宣称兼容其完整草稿生命周期 |
+| [myno](https://github.com/k7airos/myno) | 配套的本地正文编辑与样式工作台；复制富文本、导出配置不需要本服务 |
+| [Typeset Studio](https://github.com/k7airos/typeset-studio) | 配套的封面和卡片渲染器；本服务不承担排版和出图 |
+
+本服务面向自托管 API 用户，不依赖 Pipeline、myno 或私有仓库。当前公开微信接口只有 token、永久图片素材上传、`draft/add`；缺少 Pipeline 使用的草稿更新、列表、读取和删除端点，也没有实现 `Idempotency-Key` 去重。`X-App-Source` 是可选来源校验：携带时必须在允许列表内，未携带时不因此拒绝。接入 Pipeline 前仍需补齐目标流程需要的接口，不能仅配置 `wx.baseUrl` 就假定完整兼容。
+
+这里的“微信发布”指创建草稿，不包含群发或公开发布。完整发布编排可参考 Pipeline，编辑和排版可使用 myno。
+
 这个仓库现在同时支持三种交付方式：
 
 - 源码运行：适合自己改代码
@@ -50,7 +63,7 @@
    - 获取公众号 access token
    - 上传永久素材
    - 创建草稿
-   - 校验 `X-App-Source`
+   - 对已携带的 `X-App-Source` 校验允许列表
 
 6. 运行与维护
    - SQLite 迁移
