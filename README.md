@@ -418,6 +418,10 @@ bun run restore --input .backup/app-2026-03-14.sqlite
 2. 生产环境必须显式配置 `JWT_SECRET`
 3. GitHub 登录现在走标准 OAuth 授权跳转与 callback/exchange 流程，不再参考旧 Nuxt 实现
 
+## 许可证
+
+本项目使用 MIT 许可证，许可证全文见 [LICENSE](LICENSE)。
+
 ## 验证
 
 本仓库内置：
