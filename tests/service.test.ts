@@ -746,6 +746,562 @@ describe('service compatibility with Nuxt api contracts', () => {
   })
 })
 
+describe('wechat draft lifecycle endpoints and idempotency', () => {
+  let adminToken = ''
+  let wxPat = ''
+  let secondWxPat = ''
+
+  type UpstreamCall = {
+    url: string
+    method: string
+    body: Record<string, unknown> | null
+  }
+
+  beforeAll(async () => {
+    dbModule.runMigrations()
+
+    const loginResponse = await makeJsonRequest('/api/v1/user/login', {
+      username: 'admin',
+      password: 'secret123',
+    })
+    const loginPayload = await loginResponse.json() as { data: { accessToken: string } }
+    adminToken = loginPayload.data.accessToken
+
+    const generateResponse = await makeAuthedJsonRequest('/api/v1/token/generate', adminToken, {
+      note: 'wx-draft-lifecycle',
+      expiresInDays: 7,
+      scopes: ['wx'],
+    })
+    const generatePayload = await generateResponse.json() as { data: { token: string } }
+    wxPat = generatePayload.data.token
+
+    const secondGenerateResponse = await makeAuthedJsonRequest('/api/v1/token/generate', adminToken, {
+      note: 'wx-draft-lifecycle-secondary',
+      expiresInDays: 7,
+      scopes: ['wx'],
+    })
+    const secondGeneratePayload = await secondGenerateResponse.json() as { data: { token: string } }
+    secondWxPat = secondGeneratePayload.data.token
+  })
+
+  test('draft endpoints forward stripped payloads to the matching wechat cgi-bin apis', async () => {
+    const calls: UpstreamCall[] = []
+
+    setFetchMock(async (input, init) => {
+      const url = String(input)
+      const rawBody = init?.body
+      calls.push({
+        url,
+        method: init?.method || 'GET',
+        body: typeof rawBody === 'string' ? JSON.parse(rawBody) : null,
+      })
+
+      if (url.includes('/cgi-bin/draft/update')) {
+        return Response.json({ errcode: 0, errmsg: 'ok' })
+      }
+      if (url.includes('/cgi-bin/draft/get')) {
+        return Response.json({ news_item: [{ media_id: 'draft-1', title: 'Hello' }] })
+      }
+      if (url.includes('/cgi-bin/draft/delete')) {
+        return Response.json({ errcode: 0, errmsg: 'ok' })
+      }
+      if (url.includes('/cgi-bin/draft/batchget')) {
+        return Response.json({ total_count: 1, item_count: 1, item: [{ media_id: 'draft-1' }] })
+      }
+      return Response.json({})
+    })
+
+    const updateResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/update', wxPat, {
+      access_token: 'wx-token-ok',
+      media_id: 'draft-1',
+      index: 0,
+      articles: {
+        article_type: 'news',
+        title: 'Hello',
+        content: 'World',
+        thumb_media_id: 'thumb-1',
+        pic_crop_235_1: '0_0_2.35_1',
+      },
+    }, {
+      headers: { 'x-app-source': 'zotepad' },
+    })
+    const updatePayload = await updateResponse.json() as {
+      code: number
+      data: { errcode: number, errmsg: string }
+    }
+
+    expect(updateResponse.status).toBe(200)
+    expect(updatePayload.code).toBe(0)
+    expect(updatePayload.data.errcode).toBe(0)
+
+    const getResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/get', wxPat, {
+      access_token: 'wx-token-ok',
+      media_id: 'draft-1',
+    })
+    const getPayload = await getResponse.json() as {
+      data: { news_item: Array<{ media_id: string, title: string }> }
+    }
+
+    expect(getResponse.status).toBe(200)
+    expect(getPayload.data.news_item[0].media_id).toBe('draft-1')
+
+    const deleteResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/delete', wxPat, {
+      access_token: 'wx-token-ok',
+      media_id: 'draft-1',
+    })
+    const deletePayload = await deleteResponse.json() as { data: { errcode: number } }
+
+    expect(deleteResponse.status).toBe(200)
+    expect(deletePayload.data.errcode).toBe(0)
+
+    const batchResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/batchget', wxPat, {
+      access_token: 'wx-token-ok',
+      offset: 0,
+      count: 20,
+      no_content: true,
+    })
+    const batchPayload = await batchResponse.json() as {
+      data: { total_count: number, item: Array<{ media_id: string }> }
+    }
+
+    expect(batchResponse.status).toBe(200)
+    expect(batchPayload.data.total_count).toBe(1)
+
+    const updateCall = calls.find(call => call.url.includes('/cgi-bin/draft/update'))
+    expect(updateCall).toBeTruthy()
+    expect(updateCall?.method).toBe('POST')
+    expect(new URL(updateCall!.url).pathname).toBe('/cgi-bin/draft/update')
+    expect(new URL(updateCall!.url).searchParams.get('access_token')).toBe('wx-token-ok')
+    expect(updateCall?.body).toEqual({
+      media_id: 'draft-1',
+      index: 0,
+      articles: {
+        article_type: 'news',
+        title: 'Hello',
+        content: 'World',
+        thumb_media_id: 'thumb-1',
+        pic_crop_235_1: '0_0_2.35_1',
+      },
+    })
+    expect(Object.keys(updateCall?.body || {}).includes('access_token')).toBe(false)
+
+    const getCall = calls.find(call => call.url.includes('/cgi-bin/draft/get'))
+    expect(new URL(getCall!.url).pathname).toBe('/cgi-bin/draft/get')
+    expect(new URL(getCall!.url).searchParams.get('access_token')).toBe('wx-token-ok')
+    expect(getCall?.body).toEqual({ media_id: 'draft-1' })
+
+    const deleteCall = calls.find(call => call.url.includes('/cgi-bin/draft/delete'))
+    expect(new URL(deleteCall!.url).pathname).toBe('/cgi-bin/draft/delete')
+    expect(deleteCall?.body).toEqual({ media_id: 'draft-1' })
+
+    const batchCall = calls.find(call => call.url.includes('/cgi-bin/draft/batchget'))
+    expect(new URL(batchCall!.url).pathname).toBe('/cgi-bin/draft/batchget')
+    expect(batchCall?.body).toEqual({ offset: 0, count: 20, no_content: true })
+
+    restoreFetch()
+  })
+
+  test('wechat error codes are surfaced instead of being swallowed', async () => {
+    setFetchMock(async (input) => {
+      const url = String(input)
+      if (url.includes('/cgi-bin/draft/get')) {
+        return Response.json({ errcode: 40007, errmsg: 'invalid media_id' })
+      }
+      return Response.json({})
+    })
+
+    const response = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/get', wxPat, {
+      access_token: 'wx-token-ok',
+      media_id: 'missing-media-id',
+    })
+    const payload = await response.json() as {
+      code: number
+      message: string
+      data: { wxErrcode: number, wxErrmsg: string }
+    }
+
+    expect(response.status).toBe(400)
+    expect(payload.code).toBe(9002)
+    expect(payload.message).toBe('invalid media_id')
+    expect(payload.data.wxErrcode).toBe(40007)
+
+    restoreFetch()
+  })
+
+  test('idempotency key replays the first response without calling wechat twice', async () => {
+    let draftAddCalls = 0
+
+    setFetchMock(async (input) => {
+      const url = String(input)
+      if (url.includes('/cgi-bin/draft/add')) {
+        draftAddCalls += 1
+        return Response.json({ media_id: 'draft-idempotent' })
+      }
+      return Response.json({})
+    })
+
+    const body = {
+      access_token: 'wx-token-ok',
+      articles: [
+        {
+          article_type: 'news',
+          title: 'Hello',
+          content: 'World',
+          thumb_media_id: 'thumb-1',
+        },
+      ],
+    }
+    const headers = { 'idempotency-key': 'a'.repeat(64) }
+
+    const firstResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', wxPat, body, { headers })
+    const firstPayload = await firstResponse.json() as { code: number, data: { media_id: string } }
+
+    const secondResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', wxPat, body, { headers })
+    const secondPayload = await secondResponse.json() as { code: number, data: { media_id: string } }
+
+    expect(firstResponse.status).toBe(200)
+    expect(firstPayload.code).toBe(0)
+    expect(firstPayload.data.media_id).toBe('draft-idempotent')
+    expect(secondResponse.status).toBe(200)
+    expect(secondPayload.data.media_id).toBe('draft-idempotent')
+    expect(draftAddCalls).toBe(1)
+
+    restoreFetch()
+  })
+
+  test('concurrent requests with the same idempotency key execute wechat only once', async () => {
+    let draftAddCalls = 0
+
+    setFetchMock(async (input) => {
+      const url = String(input)
+      if (url.includes('/cgi-bin/draft/add')) {
+        draftAddCalls += 1
+        await Bun.sleep(40)
+        return Response.json({ media_id: 'draft-concurrent' })
+      }
+      return Response.json({})
+    })
+
+    const body = {
+      access_token: 'wx-token-ok',
+      articles: [
+        {
+          article_type: 'news',
+          title: 'Hello',
+          content: 'World',
+          thumb_media_id: 'thumb-1',
+        },
+      ],
+    }
+    const headers = { 'idempotency-key': 'b'.repeat(64) }
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', wxPat, body, { headers }),
+      makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', wxPat, body, { headers }),
+    ])
+    const firstPayload = await firstResponse.json() as { data: { media_id: string } }
+    const secondPayload = await secondResponse.json() as { data: { media_id: string } }
+
+    expect(firstResponse.status).toBe(200)
+    expect(secondResponse.status).toBe(200)
+    expect(firstPayload.data.media_id).toBe('draft-concurrent')
+    expect(secondPayload.data.media_id).toBe('draft-concurrent')
+    expect(draftAddCalls).toBe(1)
+
+    restoreFetch()
+  })
+
+  test('idempotency keys are isolated per caller', async () => {
+    let draftAddCalls = 0
+
+    setFetchMock(async (input) => {
+      const url = String(input)
+      if (url.includes('/cgi-bin/draft/add')) {
+        draftAddCalls += 1
+        return Response.json({ media_id: `draft-caller-${draftAddCalls}` })
+      }
+      return Response.json({})
+    })
+
+    const body = {
+      access_token: 'wx-token-ok',
+      articles: [
+        {
+          article_type: 'news',
+          title: 'Hello',
+          content: 'World',
+          thumb_media_id: 'thumb-1',
+        },
+      ],
+    }
+    const headers = { 'idempotency-key': 'c'.repeat(64) }
+
+    const firstCallerResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', wxPat, body, { headers })
+    const firstCallerPayload = await firstCallerResponse.json() as { data: { media_id: string } }
+
+    const secondCallerResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', secondWxPat, body, { headers })
+    const secondCallerPayload = await secondCallerResponse.json() as { data: { media_id: string } }
+
+    expect(firstCallerResponse.status).toBe(200)
+    expect(secondCallerResponse.status).toBe(200)
+    expect(firstCallerPayload.data.media_id).toBe('draft-caller-1')
+    expect(secondCallerPayload.data.media_id).toBe('draft-caller-2')
+    expect(draftAddCalls).toBe(2)
+
+    restoreFetch()
+  })
+
+  test('expired idempotency records allow the write to run again', async () => {
+    let draftAddCalls = 0
+
+    setFetchMock(async (input) => {
+      const url = String(input)
+      if (url.includes('/cgi-bin/draft/add')) {
+        draftAddCalls += 1
+        return Response.json({ media_id: `draft-expired-${draftAddCalls}` })
+      }
+      return Response.json({})
+    })
+
+    const body = {
+      access_token: 'wx-token-ok',
+      articles: [
+        {
+          article_type: 'news',
+          title: 'Hello',
+          content: 'World',
+          thumb_media_id: 'thumb-1',
+        },
+      ],
+    }
+    const headers = { 'idempotency-key': 'd'.repeat(64) }
+
+    const firstResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', wxPat, body, { headers })
+    const firstPayload = await firstResponse.json() as { data: { media_id: string } }
+    expect(firstResponse.status).toBe(200)
+    expect(draftAddCalls).toBe(1)
+
+    // 未过期时仍然是重放，不产生新的上游调用。
+    const replayResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', wxPat, body, { headers })
+    const replayPayload = await replayResponse.json() as { data: { media_id: string } }
+    expect(replayPayload.data.media_id).toBe('draft-expired-1')
+    expect(draftAddCalls).toBe(1)
+
+    dbModule.db.prepare(`
+      UPDATE wx_idempotency_keys
+      SET expires_at = ?
+      WHERE idempotency_key = ?
+    `).run('2000-01-01T00:00:00.000Z', 'd'.repeat(64))
+
+    const secondResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', wxPat, body, { headers })
+    const secondPayload = await secondResponse.json() as { data: { media_id: string } }
+
+    expect(secondResponse.status).toBe(200)
+    expect(secondPayload.data.media_id).toBe('draft-expired-2')
+    expect(draftAddCalls).toBe(2)
+    expect(firstPayload.data.media_id).toBe('draft-expired-1')
+
+    restoreFetch()
+  })
+
+  test('an interrupted pending claim can be reclaimed by a later request', async () => {
+    let draftAddCalls = 0
+
+    setFetchMock(async (input) => {
+      const url = String(input)
+      if (url.includes('/cgi-bin/draft/add')) {
+        draftAddCalls += 1
+        return Response.json({ media_id: `draft-stale-${draftAddCalls}` })
+      }
+      return Response.json({})
+    })
+
+    const body = {
+      access_token: 'wx-token-ok',
+      articles: [
+        {
+          article_type: 'news',
+          title: 'Hello',
+          content: 'World',
+          thumb_media_id: 'thumb-1',
+        },
+      ],
+    }
+    const headers = { 'idempotency-key': 'f'.repeat(64) }
+
+    const firstResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', wxPat, body, { headers })
+    expect(firstResponse.status).toBe(200)
+    expect(draftAddCalls).toBe(1)
+
+    // 模拟进程在写上游前中断：记录仍是 pending，但占位时间已经很久。
+    dbModule.db.prepare(`
+      UPDATE wx_idempotency_keys
+      SET status = 'pending',
+          response_json = NULL,
+          claimed_at = ?
+      WHERE idempotency_key = ?
+    `).run('2000-01-01T00:00:00.000Z', 'f'.repeat(64))
+
+    const secondResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', wxPat, body, { headers })
+    const secondPayload = await secondResponse.json() as { data: { media_id: string } }
+
+    expect(secondResponse.status).toBe(200)
+    expect(secondPayload.data.media_id).toBe('draft-stale-2')
+    expect(draftAddCalls).toBe(2)
+
+    restoreFetch()
+  })
+
+  test('reusing one idempotency key with different content is rejected', async () => {    let draftAddCalls = 0
+
+    setFetchMock(async (input) => {
+      const url = String(input)
+      if (url.includes('/cgi-bin/draft/add')) {
+        draftAddCalls += 1
+        return Response.json({ media_id: 'draft-conflict' })
+      }
+      return Response.json({})
+    })
+
+    const headers = { 'idempotency-key': 'e'.repeat(64) }
+    const firstResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', wxPat, {
+      access_token: 'wx-token-ok',
+      articles: [
+        {
+          article_type: 'news',
+          title: 'Hello',
+          content: 'World',
+          thumb_media_id: 'thumb-1',
+        },
+      ],
+    }, { headers })
+    expect(firstResponse.status).toBe(200)
+
+    const conflictResponse = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', wxPat, {
+      access_token: 'wx-token-ok',
+      articles: [
+        {
+          article_type: 'news',
+          title: 'Changed',
+          content: 'World',
+          thumb_media_id: 'thumb-1',
+        },
+      ],
+    }, { headers })
+    const conflictPayload = await conflictResponse.json() as { code: number, message: string }
+
+    expect(conflictResponse.status).toBe(409)
+    expect(conflictPayload.code).toBe(3003)
+    expect(draftAddCalls).toBe(1)
+
+    restoreFetch()
+  })
+
+  test('draft writes without an idempotency key keep the legacy behaviour', async () => {
+    let draftAddCalls = 0
+
+    setFetchMock(async (input) => {
+      const url = String(input)
+      if (url.includes('/cgi-bin/draft/add')) {
+        draftAddCalls += 1
+        return Response.json({ media_id: 'draft-plain' })
+      }
+      return Response.json({})
+    })
+
+    const response = await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/add', wxPat, {
+      access_token: 'wx-token-ok',
+      articles: [
+        {
+          article_type: 'news',
+          title: 'Hello',
+          content: 'World',
+          thumb_media_id: 'thumb-1',
+        },
+      ],
+    })
+    const payload = await response.json() as { code: number, data: { media_id: string } }
+
+    expect(response.status).toBe(200)
+    expect(payload.code).toBe(0)
+    expect(payload.data.media_id).toBe('draft-plain')
+    expect(draftAddCalls).toBe(1)
+
+    const emptyKeyRows = dbModule.db.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count
+      FROM wx_idempotency_keys
+      WHERE idempotency_key = ''
+    `).all()
+
+    expect(emptyKeyRows[0].count).toBe(0)
+
+    restoreFetch()
+  })
+
+  test('new draft endpoints are audited with their own action names', async () => {
+    setFetchMock(async (input) => {
+      const url = String(input)
+      if (url.includes('/cgi-bin/draft/update')) {
+        return Response.json({ errcode: 0, errmsg: 'ok' })
+      }
+      if (url.includes('/cgi-bin/draft/get')) {
+        return Response.json({ news_item: [] })
+      }
+      if (url.includes('/cgi-bin/draft/delete')) {
+        return Response.json({ errcode: 0, errmsg: 'ok' })
+      }
+      if (url.includes('/cgi-bin/draft/batchget')) {
+        return Response.json({ total_count: 0, item_count: 0, item: [] })
+      }
+      return Response.json({})
+    })
+
+    await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/update', wxPat, {
+      access_token: 'wx-token-ok',
+      media_id: 'draft-audit',
+      index: 0,
+      articles: {
+        article_type: 'news',
+        title: 'Hello',
+        content: 'World',
+        thumb_media_id: 'thumb-1',
+      },
+    })
+    await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/get', wxPat, {
+      access_token: 'wx-token-ok',
+      media_id: 'draft-audit',
+    })
+    await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/delete', wxPat, {
+      access_token: 'wx-token-ok',
+      media_id: 'draft-audit',
+    })
+    await makeAuthedJsonRequest('/api/v1/wx/cgi-bin/draft/batchget', wxPat, {
+      access_token: 'wx-token-ok',
+      offset: 0,
+      count: 20,
+    })
+
+    const auditRows = dbModule.db.query<{ action: string }, []>(`
+      SELECT action
+      FROM audit_logs
+      WHERE action IN (
+        'wechat.update_draft',
+        'wechat.get_draft',
+        'wechat.delete_draft',
+        'wechat.list_drafts'
+      )
+    `).all()
+    const actions = new Set(auditRows.map(row => row.action))
+
+    expect(actions.has('wechat.update_draft')).toBe(true)
+    expect(actions.has('wechat.get_draft')).toBe(true)
+    expect(actions.has('wechat.delete_draft')).toBe(true)
+    expect(actions.has('wechat.list_drafts')).toBe(true)
+
+    restoreFetch()
+  })
+})
+
 afterAll(() => {
   restoreFetch()
   console.info = originalConsoleInfo

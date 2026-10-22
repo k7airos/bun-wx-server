@@ -28,3 +28,40 @@ export const wechatDraftResponseSchema = z.object({
   data => typeof data.media_id === 'string' || typeof data.errcode === 'number',
   { message: '微信草稿响应缺少必要字段' },
 )
+
+export const wechatDraftUpdateResponseSchema = z.looseObject({
+  errcode: z.number().optional(),
+  errmsg: z.string().optional(),
+  media_id: z.string().optional(),
+}).refine(
+  data => typeof data.errcode === 'number' || typeof data.media_id === 'string',
+  { message: '微信草稿更新响应缺少必要字段' },
+)
+
+export const wechatDraftGetResponseSchema = z.looseObject({
+  errcode: z.number().optional(),
+  errmsg: z.string().optional(),
+  news_item: z.array(z.looseObject({})).optional(),
+}).refine(
+  data => typeof data.errcode === 'number' || Array.isArray(data.news_item),
+  { message: '微信草稿读取响应缺少必要字段' },
+)
+
+export const wechatDraftDeleteResponseSchema = z.looseObject({
+  errcode: z.number().optional(),
+  errmsg: z.string().optional(),
+}).refine(
+  data => typeof data.errcode === 'number',
+  { message: '微信草稿删除响应缺少必要字段' },
+)
+
+export const wechatDraftBatchGetResponseSchema = z.looseObject({
+  errcode: z.number().optional(),
+  errmsg: z.string().optional(),
+  total_count: z.number().optional(),
+  item_count: z.number().optional(),
+  item: z.array(z.looseObject({})).optional(),
+}).refine(
+  data => typeof data.errcode === 'number' || typeof data.total_count === 'number' || Array.isArray(data.item),
+  { message: '微信草稿列表响应缺少必要字段' },
+)

@@ -4,18 +4,20 @@
 
 1. 用户鉴权：JWT access token、refresh token、PAT(scope)
 2. COS 上传凭证：签发临时 STS，让客户端直传 COS
-3. 微信公众号代理：获取 token、上传永久素材、创建草稿
+3. 微信公众号代理：获取 token、上传永久素材、创建 / 更新 / 读取 / 删除 / 列出草稿
 
 ## 生态与使用者
 
 | 项目 | 与本服务的关系 |
 | --- | --- |
 | [blog.zzao.club](https://github.com/k7airos/blog.zzao.club) | 本服务的 API 语义来源，保留认证、PAT、COS 和基础微信代理契约；不是本服务的运行时依赖 |
-| [zzhub-pipeline](https://github.com/k7airos/zzhub-pipeline) | 需要微信中转 API 的潜在调用方；本服务目前只覆盖部分端点，不能宣称兼容其完整草稿生命周期 |
+| [zzhub-pipeline](https://github.com/k7airos/zzhub-pipeline) | 需要微信中转 API 的潜在调用方；本服务已覆盖 Pipeline 使用的 7 个微信端点与幂等去重 |
 | [myno](https://github.com/k7airos/myno) | 配套的本地正文编辑与样式工作台；复制富文本、导出配置不需要本服务 |
 | [Typeset Studio](https://github.com/k7airos/typeset-studio) | 配套的封面和卡片渲染器；本服务不承担排版和出图 |
 
-本服务面向自托管 API 用户，不依赖 Pipeline、myno 或私有仓库。当前公开微信接口只有 token、永久图片素材上传、`draft/add`；缺少 Pipeline 使用的草稿更新、列表、读取和删除端点，也没有实现 `Idempotency-Key` 去重。`X-App-Source` 是可选来源校验：携带时必须在允许列表内，未携带时不因此拒绝。接入 Pipeline 前仍需补齐目标流程需要的接口，不能仅配置 `wx.baseUrl` 就假定完整兼容。
+本服务面向自托管 API 用户，不依赖 Pipeline、myno 或私有仓库。当前公开微信接口共 7 个：token、永久图片素材上传，以及草稿的 `add` / `update` / `get` / `delete` / `batchget`，覆盖了 Pipeline 使用到的完整草稿生命周期。`draft/add` 与 `draft/update` 支持 `Idempotency-Key` 请求头去重，重复提交不会再次写入公众号草稿箱。`X-App-Source` 是可选来源校验：携带时必须在允许列表内，未携带时不因此拒绝。
+
+接入 Pipeline 时仍需确认目标流程用到的端点在上面的清单内，并按需配置 `wx.baseUrl` 与 PAT 权限。
 
 这里的“微信发布”指创建草稿，不包含群发或公开发布。完整发布编排可参考 Pipeline，编辑和排版可使用 myno。
 
@@ -63,7 +65,12 @@
    - 获取公众号 access token
    - 上传永久素材
    - 创建草稿
+   - 更新草稿中的单篇文章（改稿后覆盖同一篇草稿）
+   - 读取单篇草稿
+   - 删除草稿
+   - 分页列出草稿
    - 对已携带的 `X-App-Source` 校验允许列表
+   - `draft/add` 与 `draft/update` 支持 `Idempotency-Key` 幂等去重
 
 6. 运行与维护
    - SQLite 迁移
@@ -116,6 +123,8 @@
 - Bun 单文件构建脚本
 - Dockerfile / Compose
 - Bun test + GitHub Actions CI
+- 微信草稿写回端点：`draft/update`、`draft/get`、`draft/delete`、`draft/batchget`
+- 微信写操作的 `Idempotency-Key` 幂等去重（SQLite 落库 + 唯一约束）
 
 ## 运行要求
 
@@ -147,6 +156,7 @@ cp .env.example .env
 | `COS_REGION` | COS 地域 | `ap-guangzhou` |
 | `COS_STS_DURATION_SECONDS` | STS 临时凭证有效期 | `1800` |
 | `WX_REQUEST_TIMEOUT_MS` | 微信接口超时毫秒数 | `30000` |
+| `WX_IDEMPOTENCY_TTL_SECONDS` | 幂等键有效期（秒），超时后同一键会重新执行上游写操作 | `86400` |
 | `GITHUB_CLIENT_ID` | GitHub OAuth App Client ID | 无 |
 | `GITHUB_CLIENT_SECRET` | GitHub OAuth App Client Secret | 无 |
 | `GITHUB_CALLBACK_URL` | GitHub OAuth 回调地址 | 无 |
@@ -185,6 +195,8 @@ bun src/index.ts init-admin --username admin --password 'secret' --nickname 管�
 bun src/index.ts backup --output .backup/app.sqlite
 bun src/index.ts restore --input .backup/app.sqlite
 bun src/index.ts check-config
+bun src/index.ts cleanup-audit --days 90
+bun src/index.ts cleanup-idempotency
 ```
 
 ## 推荐的 self-host 初始化流程
@@ -371,6 +383,32 @@ bun run restore --input .backup/app-2026-03-14.sqlite
 - `POST /api/v1/wx/cgi-bin/token`
 - `POST /api/v1/wx/cgi-bin/material/add_material`
 - `POST /api/v1/wx/cgi-bin/draft/add`
+- `POST /api/v1/wx/cgi-bin/draft/update`
+- `POST /api/v1/wx/cgi-bin/draft/get`
+- `POST /api/v1/wx/cgi-bin/draft/delete`
+- `POST /api/v1/wx/cgi-bin/draft/batchget`
+
+请求体说明：
+
+| 端点 | 请求体字段 | 转发到的微信接口 |
+| --- | --- | --- |
+| `/api/v1/wx/cgi-bin/draft/add` | `access_token`、`articles`（数组） | `cgi-bin/draft/add` |
+| `/api/v1/wx/cgi-bin/draft/update` | `access_token`、`media_id`、`index`、`articles`（单篇文章对象，也接受 `{ articles: [...] }`） | `cgi-bin/draft/update` |
+| `/api/v1/wx/cgi-bin/draft/get` | `access_token`、`media_id` | `cgi-bin/draft/get` |
+| `/api/v1/wx/cgi-bin/draft/delete` | `access_token`、`media_id` | `cgi-bin/draft/delete` |
+| `/api/v1/wx/cgi-bin/draft/batchget` | `access_token`、`offset`、`count`、`no_content`（可选，布尔或 0/1） | `cgi-bin/draft/batchget` |
+
+中转层会剥掉请求体里的 `access_token`，改用微信自己的 `access_token` 查询参数，其余字段原样转发。
+
+### 幂等去重
+
+`draft/add` 与 `draft/update` 支持 `Idempotency-Key` 请求头（调用方自算的 sha256 十六进制串，最长 200 字符）：
+
+- 同一个键在有效期内只会真正向微信发起一次写操作，重复请求直接返回首次的响应内容
+- 作用域按调用方隔离：PAT 用凭证指纹、JWT 用用户身份，不同账号之间不会命中同一个键
+- 同一个键配上不同的请求内容会被拒绝（HTTP 409），避免改稿时被旧内容覆盖
+- 有效期默认 24 小时（`WX_IDEMPOTENCY_TTL_SECONDS`），到期后同一个键会重新执行上游写操作
+- 记录存在 SQLite 的 `wx_idempotency_keys` 表，服务会顺带清理过期记录，也可以手动执行 `bun src/index.ts cleanup-idempotency`
 
 ## 行为变化
 

@@ -3,6 +3,7 @@ import { backupDatabase, restoreDatabase, runMigrations } from './db'
 import { createInitialAdmin } from './lib/auth'
 import { basenamePath, resolvePath } from './lib/path'
 import { cleanupAuditLogs } from './modules/audit'
+import { cleanupExpiredIdempotencyKeys } from './modules/wechat'
 import { startServer } from './server'
 
 type ParsedArgs = {
@@ -56,6 +57,7 @@ Commands:
   bun src/index.ts restore --input .backup/app.sqlite
   bun src/index.ts check-config
   bun src/index.ts cleanup-audit [--days 90]
+  bun src/index.ts cleanup-idempotency
 
 Distribution:
   bun run build:binary
@@ -166,6 +168,15 @@ switch (args.command) {
     console.log(`matchedBeforeCleanup=${result.matchedBeforeCleanup}`)
     console.log(`deletedCount=${result.deletedCount}`)
     console.log(`totalBeforeCleanup=${result.totalBeforeCleanup}`)
+    console.log(`totalAfterCleanup=${result.totalAfterCleanup}`)
+    break
+  }
+
+  case 'cleanup-idempotency': {
+    const result = cleanupExpiredIdempotencyKeys()
+    console.log('[blog-wx-bun-service] idempotency cleanup completed')
+    console.log(`cutoffIso=${result.cutoffIso}`)
+    console.log(`deletedCount=${result.deletedCount}`)
     console.log(`totalAfterCleanup=${result.totalAfterCleanup}`)
     break
   }

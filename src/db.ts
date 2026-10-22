@@ -146,6 +146,29 @@ const migrations = [
       `)
     },
   },
+  {
+    id: '007_wx_idempotency_keys',
+    up() {
+      db.exec(`
+      CREATE TABLE IF NOT EXISTS wx_idempotency_keys (
+        id TEXT PRIMARY KEY,
+        scope_key TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        request_fingerprint TEXT NOT NULL,
+        response_json TEXT,
+        claimed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TEXT NOT NULL,
+        UNIQUE(scope_key, idempotency_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_wx_idempotency_keys_expires_at ON wx_idempotency_keys(expires_at);
+      `)
+    },
+  },
 ]
 
 let initialized = false
