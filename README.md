@@ -1,4 +1,8 @@
-# blog-wx-bun-service
+# bun-wx-server · 微信公众号 API 中转
+
+> 🐾 想直接用？[兔狲 · 公众号助手（wx-publish-studio）](https://github.com/k7airos/wx-publish-studio) 是自托管的公众号图文工作台：写文章、配样式与封面、预览后存入你自己的公众号草稿箱，`docker compose up` 一条命令起全套，本服务已作为 `relay` 服务随栈打包。
+
+仓库名为 `bun-wx-server`，包名与服务名仍是 `blog-wx-bun-service`（早期名称，保留以兼容既有部署）。
 
 一个基于 Bun 与 `bun:sqlite` 的轻量 API 服务，聚焦“认证 + 上传 + 微信发布链路”这 3 个核心能力：
 
@@ -10,6 +14,7 @@
 
 | 项目 | 与本服务的关系 |
 | --- | --- |
+| [wx-publish-studio](https://github.com/k7airos/wx-publish-studio) | 自托管的公众号图文工作台，把本服务作为 `relay` 服务随栈打包（镜像 `ghcr.io/k7airos/wx-relay`），Worker 经它访问微信；`scripts/relay-init.sh` 负责创建管理员并生成带 `wx` scope 的 PAT |
 | [blog.zzao.club](https://github.com/k7airos/blog.zzao.club) | 本服务的 API 语义来源，保留认证、PAT、COS 和基础微信代理契约；不是本服务的运行时依赖 |
 | [zzhub-pipeline](https://github.com/k7airos/zzhub-pipeline) | 需要微信中转 API 的潜在调用方；本服务已覆盖 Pipeline 使用的 7 个微信端点与幂等去重 |
 | [myno](https://github.com/k7airos/myno) | 配套的本地正文编辑与样式工作台；复制富文本、导出配置不需要本服务 |
@@ -114,17 +119,9 @@
 - 本地用户名密码登录
 - GitHub OAuth 登录
 
-## 这次补齐了什么
+## 近期变化
 
-- 显式初始化管理员，移除“首个注册自动 superAdmin”
-- SQLite 迁移机制：`schema_migrations`
-- 备份 / 恢复命令
-- 生产配置强校验
-- Bun 单文件构建脚本
-- Dockerfile / Compose
-- Bun test + GitHub Actions CI
-- 微信草稿写回端点：`draft/update`、`draft/get`、`draft/delete`、`draft/batchget`
-- 微信写操作的 `Idempotency-Key` 幂等去重（SQLite 落库 + 唯一约束）
+近期补齐了微信草稿写回端点（`draft/update`、`draft/get`、`draft/delete`、`draft/batchget`，微信接口共 7 个）和 `Idempotency-Key` 幂等去重；此外还有显式初始化管理员、SQLite 迁移机制、备份 / 恢复命令、生产配置强校验、Bun 单文件构建、Dockerfile / Compose 与 CI。完整记录见 [CHANGELOG](CHANGELOG.md)。
 
 ## 运行要求
 
@@ -410,17 +407,13 @@ bun run restore --input .backup/app-2026-03-14.sqlite
 - 有效期默认 24 小时（`WX_IDEMPOTENCY_TTL_SECONDS`），到期后同一个键会重新执行上游写操作
 - 记录存在 SQLite 的 `wx_idempotency_keys` 表，服务会顺带清理过期记录，也可以手动执行 `bun src/index.ts cleanup-idempotency`
 
-## 行为变化
+## 升级注意（行为变化）
 
-如果你是从旧版本迁移过来，最重要的变化只有两个：
+如果你是从旧版本迁移过来，最重要的变化有三个：
 
 1. 不再支持“用户不存在时自动注册并首个用户升管理员”
 2. 生产环境必须显式配置 `JWT_SECRET`
 3. GitHub 登录现在走标准 OAuth 授权跳转与 callback/exchange 流程，不再参考旧 Nuxt 实现
-
-## 许可证
-
-本项目使用 MIT 许可证，许可证全文见 [LICENSE](LICENSE)。
 
 ## 验证
 
@@ -435,3 +428,7 @@ bun run check
 - `bun test`
 - `bun src/index.ts --help`
 - `bun src/index.ts check-config`
+
+## 许可证
+
+本项目使用 MIT 许可证，许可证全文见 [LICENSE](LICENSE)。
